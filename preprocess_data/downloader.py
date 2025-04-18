@@ -1,6 +1,7 @@
 import os
 import zipfile
 import requests
+from tqdm import tqdm
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,10 +23,19 @@ class ESC50Downloader:
 
         print(" Скачивание ESC-50...")
         response = requests.get(self.url, stream=True)
-        with open(self.zip_path, "wb") as f:
+        with open(self.zip_path, "wb") as f, tqdm(
+            desc="Downloading",
+            unit='iB',
+            unit_scale=True,
+            unit_divisor=1024
+        ) as bar:
             for chunk in response.iter_content(chunk_size=1024):
                 if chunk:
                     f.write(chunk)
+                    bar.update(len(chunk))
+
+        final_size = os.path.getsize(self.zip_path) / (1024**2)
+        print(f"Download complete: {final_size:.2f} MiB")
 
     def extract_dataset(self):
         print(" Распаковка архива...")
