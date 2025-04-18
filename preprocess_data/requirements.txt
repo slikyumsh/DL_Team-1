@@ -1,0 +1,9 @@
+numpy
+pandas
+matplotlib
+librosa
+scikit-learn
+tqdm
+python-dotenv
+requests
+Pillow
