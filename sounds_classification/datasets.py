@@ -4,7 +4,9 @@ import numpy as np
 import os
 from dotenv import load_dotenv
 
-load_dotenv("../preprocess_data/.env")
+model_config = "./model.env"
+load_dotenv(model_config)
+load_dotenv(os.getenv("PREPROCESS_PATH"))
 
 class SpectrogramDataset(Dataset):
     def __init__(self, root_dir):
@@ -31,4 +33,4 @@ class SpectrogramDataset(Dataset):
             spectrogram = np.expand_dims(spectrogram, axis=0)  # Добавить канал: (1, H, W)
         label = self.labels[idx]
         label = self.labels[idx]
-        return torch.tensor(spectrogram, dtype=torch.float32), label
+        return torch.tensor(spectrogram, dtype=torch.float16), label

@@ -3,6 +3,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import torch
 import logging
+import os
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,12 +53,14 @@ if __name__ == "__main__":
     test_dataset = SpectrogramDataset("test")
 
     logging.info("creating dataloaders")
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=32)
-    test_loader = DataLoader(test_dataset, batch_size=32)
+    batch_size = int(os.getenv("BATCH_SIZE"))
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size)
 
     logging.info("testing dataloaders")
     class_names = train_dataset.classes
-    sanity_check_loader(train_loader, num_classes=len(class_names), expected_shape=(1, 128, 128))
-    sanity_check_loader(val_loader,   num_classes=len(class_names), expected_shape=(1, 128, 128))
-    sanity_check_loader(test_loader,  num_classes=len(class_names), expected_shape=(1, 128, 128))
+    shape = tuple(int(num) for num in os.getenv("SHAPE").split(','))
+    sanity_check_loader(train_loader, num_classes=len(class_names), expected_shape=shape)
+    sanity_check_loader(val_loader,   num_classes=len(class_names), expected_shape=shape)
+    sanity_check_loader(test_loader,  num_classes=len(class_names), expected_shape=shape)
