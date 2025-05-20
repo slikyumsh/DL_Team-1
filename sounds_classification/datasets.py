@@ -54,7 +54,7 @@ class SpectrogramDataset(Dataset):
         if spectrogram.ndim == 2:
             spectrogram = np.expand_dims(spectrogram, axis=0)  # Добавить канал: (1, H, W)
         label = self.labels[idx]
-        return torch.tensor(spectrogram, dtype=torch.float32), label # TODO обратно к float16
+        return torch.tensor(spectrogram, dtype=torch.float16), label
     
     def generate_augmented_data(self, subset="train", augmentations_per_sample=2):
         """
