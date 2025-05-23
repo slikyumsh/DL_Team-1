@@ -11,6 +11,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch.nn.functional import binary_cross_entropy_with_logits
 
 from sklearn.metrics import roc_auc_score, roc_curve, f1_score, confusion_matrix
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
 class SpectrogramGroupDataset(Dataset):
@@ -86,35 +87,43 @@ pos_weight = torch.tensor([counts["other"] / counts["chainsaw"]], dtype=torch.fl
 train_dataset = SpectrogramGroupDataset("dataset/train", augment=True)
 val_dataset = SpectrogramGroupDataset("dataset/val", augment=False)
 
-train_loader = DataLoader(train_dataset, batch_size=256, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=256, shuffle=False)
+train_loader = DataLoader(train_dataset, batch_size=256, shuffle=True, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=256, shuffle=False, pin_memory=True)
 
 
 class CNNLSTMClassifier(nn.Module):
     def __init__(self, hidden_size=128, num_layers=2):
         super().__init__()
-        self.conv1 = nn.Conv2d(1, 16, kernel_size=3, padding=1)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
 
-        self.flattened_size = 64 * 16 * 16
-        self.feature_fc = nn.Linear(self.flattened_size, 128)
+        self.net = nn.Sequential(
+            nn.Conv2d(1, 16, kernel_size=3, padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
 
-        self.lstm = nn.LSTM(input_size=128, hidden_size=hidden_size, num_layers=num_layers, batch_first=True)
+            nn.Conv2d(16, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
 
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+
+            nn.Flatten(),
+            nn.Linear(64 * 16 * 16, 128),
+            nn.ReLU()
+        )
+
+        self.lstm = nn.LSTM(input_size=128, hidden_size=hidden_size, num_layers=num_layers, batch_first=True, dropout=0.5)
         self.output_fc = nn.Linear(hidden_size, 1)
 
     def forward(self, x):
         B, T, H, W = x.shape
         x = x.view(B * T, 1, H, W)
 
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = self.pool(F.relu(self.conv3(x)))
-        x = x.view(x.size(0), -1)
-        x = F.relu(self.feature_fc(x))
-
+        x = self.net(x)
         x = x.view(B, T, -1)
 
         lstm_out, _ = self.lstm(x)
@@ -125,7 +134,8 @@ class CNNLSTMClassifier(nn.Module):
 
 
 model = CNNLSTMClassifier().to(device)
-optimizer = AdamW(model.parameters(), lr=1e-5, weight_decay=0.01)
+optimizer = AdamW(model.parameters(), lr=1e-5, weight_decay=0.1)
+scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=1)
 
 best_loss = 100.
 patience = 3
@@ -193,8 +203,12 @@ for epoch in range(300):
             print("Early stopping triggered.")
             break
 
+    scheduler.step(val_loss / len(val_loader))
+    print("Current LR:", optimizer.param_groups[0]['lr'])
+
 fpr, tpr, _ = roc_curve(all_labels, all_preds)
 roc_auc = roc_auc_score(all_labels, all_preds)
+torch.save(model.state_dict(), "model_weights.pth")
 
 print(f"Final ROC-AUC: {roc_auc:.4f}")
 
