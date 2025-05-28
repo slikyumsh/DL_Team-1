@@ -1,26 +1,53 @@
 import os
+import random
+from pathlib import Path
+from dotenv import load_dotenv
 
-AUDIO_DIR = 'artifacts/audio'
-OUTPUT_HTML = 'artifacts/plots/mos_rating.html'
+"""
+Генерирует HTML‑страницу для субъективной оценки (MOS) сгенерированных
+звуков. Каждому плееру — радиогруппа 1…5. Итоговый файл можно открыть
+локально в браузере или задеплоить на GitHub‑Pages.
+"""
 
-os.makedirs(os.path.dirname(OUTPUT_HTML), exist_ok=True)
-audio_files = sorted([f for f in os.listdir(AUDIO_DIR) if f.endswith('.wav')])
+load_dotenv()
 
-html = "<html><head><title>MOS Rating</title></head><body>"
-html += "<h1>Mean Opinion Score (MOS) — Synthetic Sounds</h1>"
-html += "<form>"
+AUDIO_DIR = Path(os.getenv("GEN_AUDIO_DIR", "artifacts/audio"))
+HTML_FILE = Path(os.getenv("MOS_HTML_PATH", "artifacts/plots/mos_rating.html"))
 
-for i, filename in enumerate(audio_files):
-    html += f"<h3>Sound {i+1}</h3>"
-    html += f"<audio controls src='../audio/{filename}'></audio><br>"
-    html += f"<label>Rate quality (1 = Bad, 5 = Excellent):</label><br>"
-    for score in range(1, 6):
-        html += f"<input type='radio' name='sound{i}' value='{score}'> {score} "
-    html += "<br><hr>"
+AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+HTML_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-html += "</form></body></html>"
+audio_files = sorted([p for p in AUDIO_DIR.glob("*.wav")])
+if not audio_files:
+    raise SystemExit(f"Нет WAV‑файлов в {AUDIO_DIR}")
 
-with open(OUTPUT_HTML, 'w') as f:
-    f.write(html)
+random.shuffle(audio_files)
 
-print(f"HTML для MOS сохранён: {OUTPUT_HTML}")
+rel_paths = [os.path.relpath(p, HTML_FILE.parent) for p in audio_files]
+
+def html_radio(group: str) -> str:
+    return " ".join(
+        f"<label><input type='radio' name='{group}' value='{s}'> {s}</label>" for s in range(1, 6)
+    )
+
+html = [
+    "<html><head><meta charset='utf-8'><title>MOS Rating</title></head><body>",
+    "<h1 style='font-family:sans-serif'>Mean Opinion Score (MOS) ‒ Synthetic Sounds</h1>",
+    "<p>Прослушайте каждый звук и отметьте субъективное качество (1 = плохо, 5 = отлично).</p>",
+    "<form id='mosForm'>",
+]
+
+for idx, rel in enumerate(rel_paths, 1):
+    html.append(f"<h3>Звук {idx}</h3>")
+    html.append(f"<audio controls src='{rel}'></audio><br>")
+    html.append(html_radio(f"sound{idx}"))
+    html.append("<hr>")
+
+html.extend([
+    "<button type='submit'>Сохранить результаты</button>",
+    "</form>",
+    "</body></html>",
+])
+
+HTML_FILE.write_text("\n".join(html), encoding="utf-8")
+print("HTML для MOS сохранён:", HTML_FILE)
