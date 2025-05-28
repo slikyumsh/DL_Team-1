@@ -4,21 +4,29 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset, random_split
+from dotenv import load_dotenv
+import matplotlib.pyplot as plt
+import pandas as pd
 
-# ✅ Настройки
-BATCH_SIZE = 32
-EPOCHS = 50
-LATENT_DIM = 128
-HIDDEN_DIM = 512
-DATA_PATH = 'artifacts/spectrograms/spectrograms.pkl'
-MODEL_PATH = 'artifacts/models/vae.pth'
+load_dotenv()
+
+BATCH_SIZE = int(os.getenv("BATCH_SIZE"))
+EPOCHS = int(os.getenv("EPOCHS"))
+LATENT_DIM = int(os.getenv("LATENT_DIM"))
+HIDDEN_DIM = int(os.getenv("HIDDEN_DIM"))
+LEARNING_RATE = float(os.getenv("LEARNING_RATE"))
+DATA_PATH = os.getenv("SPEC_DATA")
+MODEL_PATH = os.getenv("VAE_MODEL_PATH")
+LOG_PATH = os.getenv("VAE_LOG_PATH")
+PLOT_PATH = os.getenv("VAE_PLOT_PATH")
+
 os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+os.makedirs(os.path.dirname(PLOT_PATH), exist_ok=True)
 
-# Устройство
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Используется устройство:", device)
 
-# Загрузка данных
 X = joblib.load(DATA_PATH)
 X_tensor = torch.tensor(X, dtype=torch.float32)
 dataset = TensorDataset(X_tensor)
@@ -30,7 +38,6 @@ val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE)
 
 input_dim = X.shape[1]
 
-# VAE-модель
 class VAE(nn.Module):
     def __init__(self, input_dim, hidden_dim, latent_dim):
         super(VAE, self).__init__()
@@ -59,17 +66,16 @@ class VAE(nn.Module):
         recon = self.decode(z)
         return recon, mu, logvar
 
-# Функция потерь
 def vae_loss(recon_x, x, mu, logvar):
     recon_loss = F.mse_loss(recon_x, x, reduction='mean')
     kl = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
     return recon_loss + kl
 
-# Инициализация
 model = VAE(input_dim, HIDDEN_DIM, LATENT_DIM).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-# Обучение
+history = {"epoch": [], "train_loss": [], "val_loss": []}
+
 for epoch in range(EPOCHS):
     model.train()
     total_loss = 0
@@ -91,8 +97,30 @@ for epoch in range(EPOCHS):
             loss = vae_loss(recon, x, mu, logvar)
             val_loss += loss.item()
 
-    print(f"Эпоха {epoch+1}/{EPOCHS} | Train Loss: {total_loss/len(train_loader):.4f} | Val Loss: {val_loss/len(val_loader):.4f}")
+    epoch_train_loss = total_loss / len(train_loader)
+    epoch_val_loss = val_loss / len(val_loader)
+    history["epoch"].append(epoch + 1)
+    history["train_loss"].append(epoch_train_loss)
+    history["val_loss"].append(epoch_val_loss)
 
-# Сохранение модели
+    print(f"Эпоха {epoch+1}/{EPOCHS} | Train Loss: {epoch_train_loss:.4f} | Val Loss: {epoch_val_loss:.4f}")
+
 torch.save(model.state_dict(), MODEL_PATH)
 print(f"Модель сохранена в {MODEL_PATH}")
+
+df = pd.DataFrame(history)
+df.to_csv(LOG_PATH, index=False)
+print(f"Лог обучения сохранён в {LOG_PATH}")
+
+plt.figure(figsize=(8, 5))
+plt.plot(history["epoch"], history["train_loss"], label="Train Loss")
+plt.plot(history["epoch"], history["val_loss"], label="Val Loss")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.title("VAE Training Loss")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig(PLOT_PATH)
+plt.close()
+print(f"График потерь сохранён в {PLOT_PATH}")

@@ -5,21 +5,21 @@ import torch
 import torch.nn as nn
 from sklearn.metrics.pairwise import cosine_similarity
 import matplotlib.pyplot as plt
+from dotenv import load_dotenv
 
-# Пути
-MODEL_PATH = 'artifacts/models/vae.pth'
-SPEC_PATH = 'artifacts/spectrograms/spectrograms.pkl'
-PLOT_PATH = 'artifacts/plots/cosine_similarity.png'
+load_dotenv()
 
-# Параметры
-LATENT_DIM = 128
-HIDDEN_DIM = 512
-INPUT_DIM = 128 * 128
-NUM_SAMPLES = 10
+LATENT_DIM = int(os.getenv("LATENT_DIM"))
+HIDDEN_DIM = int(os.getenv("HIDDEN_DIM"))
+INPUT_DIM = int(os.getenv("SPEC_HEIGHT")) * int(os.getenv("SPEC_WIDTH"))
+NUM_SAMPLES = int(os.getenv("NUM_SAMPLES"))
+MODEL_PATH = os.getenv("VAE_MODEL_PATH")
+SPEC_PATH = os.getenv("SPEC_DATA")
+PLOT_PATH = os.getenv("EVAL_PLOT_PATH")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Устройство оценки:", device)
 
-# VAE модель
 class VAE(nn.Module):
     def __init__(self, input_dim, hidden_dim, latent_dim):
         super(VAE, self).__init__()
@@ -47,25 +47,20 @@ class VAE(nn.Module):
         z = self.reparameterize(mu, logvar)
         return self.decode(z), mu, logvar
 
-# Загрузка настоящих спектрограмм
 real_specs = joblib.load(SPEC_PATH)
-real_specs = real_specs[:NUM_SAMPLES]  # только часть для оценки
+real_specs = real_specs[:NUM_SAMPLES]
 
-# Загрузка модели
 model = VAE(INPUT_DIM, HIDDEN_DIM, LATENT_DIM).to(device)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
 model.eval()
 
-# Генерация спектрограмм
 z = torch.randn(NUM_SAMPLES, LATENT_DIM).to(device)
 with torch.no_grad():
     fake_specs = model.decode(z).cpu().numpy()
 
-# Вычисление cosine similarity
 similarity_matrix = cosine_similarity(real_specs, fake_specs)
 mean_similarity = np.mean(np.diag(similarity_matrix))
 
-# Визуализация
 plt.figure(figsize=(8, 6))
 plt.imshow(similarity_matrix, cmap='viridis', interpolation='nearest')
 plt.colorbar()

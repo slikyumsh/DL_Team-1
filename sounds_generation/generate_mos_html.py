@@ -23,4 +23,4 @@ html += "</form></body></html>"
 with open(OUTPUT_HTML, 'w') as f:
     f.write(html)
 
-print(f"✅ HTML для MOS сохранён: {OUTPUT_HTML}")
+print(f"HTML для MOS сохранён: {OUTPUT_HTML}")
