@@ -105,6 +105,9 @@ if __name__=="__main__":
     LR = float(os.getenv("LR")) # 1e-3
     NUM_CLASSES = int(os.getenv("NUM_CLASSES"))
     AUG_P_SAMP = int(os.getenv("AUG_P_SAMP"))
+    MODEL_OUTPUT = os.getenv("MODEL_OUTPUT")
+
+    os.makedirs(os.path.dirname(MODEL_OUTPUT), exist_ok=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -132,3 +135,4 @@ if __name__=="__main__":
                 num_epochs=EPOCHS)
     
     evaluate_model(model, test_loader, device, "Test")
+    torch.save(model.state_dict, MODEL_OUTPUT)
