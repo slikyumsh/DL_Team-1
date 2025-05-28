@@ -12,7 +12,9 @@ load_dotenv()
 
 LATENT_DIM = int(os.getenv("LATENT_DIM"))
 HIDDEN_DIM = int(os.getenv("HIDDEN_DIM"))
-INPUT_DIM = int(os.getenv("SPEC_HEIGHT")) * int(os.getenv("SPEC_WIDTH"))
+SPEC_HEIGHT = int(os.getenv("SPEC_HEIGHT"))
+SPEC_WIDTH = int(os.getenv("SPEC_WIDTH"))
+INPUT_DIM = SPEC_HEIGHT * SPEC_WIDTH
 NUM_SAMPLES = int(os.getenv("NUM_SAMPLES"))
 MODEL_PATH = os.getenv("VAE_MODEL_PATH")
 OUTPUT_AUDIO = os.getenv("AUDIO_OUTPUT_DIR")
@@ -33,10 +35,13 @@ with torch.no_grad():
     generated = model.decode(z).cpu().numpy()
 
 for i, sample in enumerate(generated):
-    spec = sample.reshape((int(os.getenv("SPEC_HEIGHT")), int(os.getenv("SPEC_WIDTH"))))
+    spec = sample.reshape((SPEC_HEIGHT, SPEC_WIDTH))
     S = librosa.db_to_amplitude(spec * 80 - 80)
-    y = librosa.istft(S, hop_length=512)
 
+    # Griffin-Lim восстановление фазы и сигнала
+    y = librosa.griffinlim(S, hop_length=512, n_iter=32)
+
+    # Нормализация громкости
     rms = np.sqrt(np.mean(y ** 2))
     target_rms = 0.1
     if rms > 0:
@@ -45,6 +50,7 @@ for i, sample in enumerate(generated):
     audio_path = os.path.join(OUTPUT_AUDIO, f'synthetic_{i}.wav')
     sf.write(audio_path, y, samplerate=22050)
 
+    # Визуализация спектрограммы
     plt.figure(figsize=(6, 4))
     librosa.display.specshow(spec, sr=22050, x_axis='time', y_axis='log')
     plt.colorbar(format="%+2.0f dB")
