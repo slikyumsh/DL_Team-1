@@ -2,13 +2,11 @@ import os
 import joblib
 import numpy as np
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 from sklearn.metrics.pairwise import cosine_similarity
 import matplotlib.pyplot as plt
 from dotenv import load_dotenv
-import torch.nn.functional as F
-from vae_model import VAE
-
+from vae_model import ConvVAE
 
 load_dotenv()
 
@@ -25,14 +23,15 @@ print("Устройство оценки:", device)
 
 real_specs = joblib.load(SPEC_PATH)
 real_specs = real_specs[:NUM_SAMPLES]
+real_specs_tensor = torch.tensor(real_specs, dtype=torch.float32).view(-1, 1, 128, 128).to(device)
 
-model = VAE(INPUT_DIM, HIDDEN_DIM, LATENT_DIM).to(device)
+model = ConvVAE().to(device)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
 model.eval()
 
 z = torch.randn(NUM_SAMPLES, LATENT_DIM).to(device)
 with torch.no_grad():
-    fake_specs = model.decode(z).cpu().numpy()
+    fake_specs = model.decode(z).cpu().numpy().reshape(NUM_SAMPLES, -1)
 
 similarity_matrix = cosine_similarity(real_specs, fake_specs)
 mean_similarity = np.mean(np.diag(similarity_matrix))

@@ -1,20 +1,18 @@
 import os
 import joblib
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset, random_split
 from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 import pandas as pd
-from vae_model import VAE
+from vae_model import ConvVAE
 
 load_dotenv()
 
 BATCH_SIZE = int(os.getenv("BATCH_SIZE"))
 EPOCHS = int(os.getenv("EPOCHS"))
 LATENT_DIM = int(os.getenv("LATENT_DIM"))
-HIDDEN_DIM = int(os.getenv("HIDDEN_DIM"))
 LEARNING_RATE = float(os.getenv("LEARNING_RATE"))
 DATA_PATH = os.getenv("SPEC_DATA")
 MODEL_PATH = os.getenv("VAE_MODEL_PATH")
@@ -29,7 +27,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Используется устройство:", device)
 
 X = joblib.load(DATA_PATH)
-X_tensor = torch.tensor(X, dtype=torch.float32)
+X_tensor = torch.tensor(X, dtype=torch.float32).reshape(-1, 1, 128, 128)
 dataset = TensorDataset(X_tensor)
 train_size = int(0.9 * len(dataset))
 val_size = len(dataset) - train_size
@@ -37,14 +35,12 @@ train_ds, val_ds = random_split(dataset, [train_size, val_size])
 train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
 val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE)
 
-input_dim = X.shape[1]
-
 def vae_loss(recon_x, x, mu, logvar):
     recon_loss = F.mse_loss(recon_x, x, reduction='mean')
     kl = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
     return recon_loss + kl
 
-model = VAE(input_dim, HIDDEN_DIM, LATENT_DIM).to(device)
+model = ConvVAE(latent_dim=LATENT_DIM).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
 history = {"epoch": [], "train_loss": [], "val_loss": []}

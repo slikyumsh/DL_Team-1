@@ -1,14 +1,12 @@
 import os
 import numpy as np
 import torch
-import torch.nn as nn
 import matplotlib.pyplot as plt
 import librosa
 import librosa.display
 import soundfile as sf
 from dotenv import load_dotenv
-import torch.nn.functional as F
-from vae_model import VAE
+from vae_model import ConvVAE
 
 load_dotenv()
 
@@ -26,8 +24,7 @@ os.makedirs(OUTPUT_PLOTS, exist_ok=True)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Устройство генерации:", device)
 
-
-model = VAE(INPUT_DIM, HIDDEN_DIM, LATENT_DIM).to(device)
+model = ConvVAE().to(device)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
 model.eval()
 
@@ -40,12 +37,10 @@ for i, sample in enumerate(generated):
     S = librosa.db_to_amplitude(spec * 80 - 80)
     y = librosa.istft(S, hop_length=512)
 
-    # Нормализация громкости
     rms = np.sqrt(np.mean(y ** 2))
-    target_rms = 0.1  # эмпирическое значение (-20 dB)
+    target_rms = 0.1
     if rms > 0:
         y = y * (target_rms / rms)
-
 
     audio_path = os.path.join(OUTPUT_AUDIO, f'synthetic_{i}.wav')
     sf.write(audio_path, y, samplerate=22050)

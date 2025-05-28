@@ -1,25 +1,55 @@
-# vae_model.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class VAE(nn.Module):
-    def __init__(self, input_dim, hidden_dim, latent_dim):
-        super(VAE, self).__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.fc_mu = nn.Linear(hidden_dim, latent_dim)
-        self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
+class ConvVAE(nn.Module):
+    def __init__(self, latent_dim=128):
+        super(ConvVAE, self).__init__()
+        # Encoder
+        self.encoder = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=4, stride=2, padding=1),  # 64x64
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(),
 
-        self.fc_decode1 = nn.Linear(latent_dim, hidden_dim)
-        self.fc_decode2 = nn.Linear(hidden_dim, hidden_dim // 2)
-        self.fc_decode3 = nn.Linear(hidden_dim // 2, input_dim)
+            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),  # 32x32
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(),
 
-        self.dropout = nn.Dropout(0.2)
-        self.bn1 = nn.BatchNorm1d(hidden_dim)
-        self.bn2 = nn.BatchNorm1d(hidden_dim // 2)
+            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),  # 16x16
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(),
+
+            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),  # 8x8
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU()
+        )
+
+        self.flatten_dim = 256 * 8 * 8
+        self.fc_mu = nn.Linear(self.flatten_dim, latent_dim)
+        self.fc_logvar = nn.Linear(self.flatten_dim, latent_dim)
+        self.fc_z = nn.Linear(latent_dim, self.flatten_dim)
+
+        # Decoder
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),  # 16x16
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(),
+
+            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),  # 32x32
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(),
+
+            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),  # 64x64
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(),
+
+            nn.ConvTranspose2d(32, 1, kernel_size=4, stride=2, padding=1),  # 128x128
+            nn.Sigmoid()
+        )
 
     def encode(self, x):
-        h = F.relu(self.fc1(x))
+        h = self.encoder(x)
+        h = h.view(h.size(0), -1)
         return self.fc_mu(h), self.fc_logvar(h)
 
     def reparameterize(self, mu, logvar):
@@ -28,12 +58,12 @@ class VAE(nn.Module):
         return mu + eps * std
 
     def decode(self, z):
-        h = F.leaky_relu(self.bn1(self.fc_decode1(z)))
-        h = self.dropout(h)
-        h = F.leaky_relu(self.bn2(self.fc_decode2(h)))
-        return torch.sigmoid(self.fc_decode3(h))
+        h = self.fc_z(z)
+        h = h.view(-1, 256, 8, 8)
+        return self.decoder(h)
 
     def forward(self, x):
         mu, logvar = self.encode(x)
         z = self.reparameterize(mu, logvar)
-        return self.decode(z), mu, logvar
+        recon = self.decode(z)
+        return recon, mu, logvar
