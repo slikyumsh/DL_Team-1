@@ -56,7 +56,7 @@ for idx, row in meta.iterrows():
             power=2.0,
         )
 
-        S_db = librosa.power_to_db(S, ref=1.0)
+        S_db = librosa.power_to_db(S, ref=np.max)
         S_db = np.clip(S_db, -DB_RANGE, 0)
 
         S_norm = (S_db + DB_RANGE) / DB_RANGE  # 0 → ‑80 дБ, 1 → 0 дБ

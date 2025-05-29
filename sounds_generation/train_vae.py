@@ -6,15 +6,8 @@ from torch.utils.data import DataLoader, TensorDataset, random_split
 from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 import pandas as pd
-from vae_model import UNetVAE  # новая модель
-
-"""
-train_vae.py — обучение U‑Net‑VAE на лог‑Mel‑спектрограммах.
-• Лосс = 0.5·L1 + 0.5·MSE + β·KL; β разогревается до 0.25 за 30 эпох.
-•CosineAnnealingLR.
-• Grad‑clip (1.0).
-• Сохранение лучшей (по val‑loss) модели.
-"""
+from vae_model import UNetVAE, Discriminator
+import numpy as np
 
 load_dotenv()
 
@@ -22,20 +15,21 @@ BATCH_SIZE = int(os.getenv("BATCH_SIZE", 64))
 EPOCHS = int(os.getenv("EPOCHS", 200))
 LATENT_DIM = int(os.getenv("LATENT_DIM", 128))
 LEARNING_RATE = float(os.getenv("LEARNING_RATE", 1e-3))
-DATA_PATH = os.getenv("SPEC_DATA")           
-MODEL_PATH = os.getenv("VAE_MODEL_PATH")      
-LOG_PATH = os.getenv("VAE_LOG_PATH")          
-PLOT_PATH = os.getenv("VAE_PLOT_PATH")         
+DATA_PATH = os.getenv("SPEC_DATA")
+MODEL_PATH = os.getenv("VAE_MODEL_PATH")
+LOG_PATH = os.getenv("VAE_LOG_PATH")
+PLOT_PATH = os.getenv("VAE_PLOT_PATH")
 
 os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
 os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
 os.makedirs(os.path.dirname(PLOT_PATH), exist_ok=True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print("Используется устройство:", device)
+print("Устройство:", device)
 
-X = joblib.load(DATA_PATH)  # shape: N × 128 × 128, dtype float32 0‒1
-X_tensor = torch.from_numpy(X).unsqueeze(1)  # N × 1 × 128 × 128
+X = joblib.load(DATA_PATH)
+X_tensor = torch.from_numpy(X).unsqueeze(1)
+X_tensor = X_tensor.expand(-1, 3, -1, -1)
 
 train_size = int(0.9 * len(X_tensor))
 val_size = len(X_tensor) - train_size
@@ -43,9 +37,13 @@ train_ds, val_ds = random_split(TensorDataset(X_tensor), [train_size, val_size])
 train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True)
 val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, pin_memory=True)
 
-model = UNetVAE(latent_dim=LATENT_DIM).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
+vae = UNetVAE(latent_dim=LATENT_DIM, in_ch=3).to(device)
+disc = Discriminator(in_ch=3).to(device)
+
+opt_vae = torch.optim.Adam(vae.parameters(), lr=LEARNING_RATE)
+opt_disc = torch.optim.Adam(disc.parameters(), lr=LEARNING_RATE * 0.5)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt_vae, T_max=EPOCHS)
+bce = torch.nn.BCELoss()
 
 def vae_loss(recon_x, x, mu, logvar, beta=0.25):
     l1 = F.l1_loss(recon_x, x, reduction="mean")
@@ -54,71 +52,98 @@ def vae_loss(recon_x, x, mu, logvar, beta=0.25):
     kl = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
     return recon_loss + beta * kl, recon_loss, kl
 
+history = {"epoch": [], "train_loss": [], "val_loss": [], "recon_loss": [], "kl_loss": [], "gan_loss": [], "beta": []}
 best_val = float("inf")
-history = {"epoch": [], "train_loss": [], "val_loss": [], "recon_loss": [], "kl_loss": []}
+
+# --- KL control ---
+beta = 0.001
+target_kl = 1.0
+kl_tolerance = 0.1  # ±10%
 
 for epoch in range(1, EPOCHS + 1):
-    model.train()
-    sum_loss = sum_recon = sum_kl = 0.0
-
-    # β‑аннелинг: 0 → 0.25 за 30 эпох
-    beta = min(0.25, epoch / 30 * 0.25)
+    vae.train()
+    disc.train()
+    sum_total = sum_recon = sum_kl = sum_gan = 0.0
 
     for (x_batch,) in train_loader:
         x_batch = x_batch.to(device)
-        optimizer.zero_grad(set_to_none=True)
+        valid = torch.ones(x_batch.size(0), device=device)
+        fake = torch.zeros(x_batch.size(0), device=device)
 
-        recon, mu, logvar = model(x_batch)
-        loss, recon_l, kl_l = vae_loss(recon, x_batch, mu, logvar, beta)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optimizer.step()
+        recon, mu, logvar = vae(x_batch)
+        loss_vae, recon_l, kl_l = vae_loss(recon, x_batch, mu, logvar, beta)
 
-        sum_loss += loss.item()
+        pred_real = disc(x_batch)
+        pred_fake = disc(recon.detach())
+        loss_disc = bce(pred_real, valid) + bce(pred_fake, fake)
+        opt_disc.zero_grad()
+        loss_disc.backward()
+        opt_disc.step()
+
+        pred_fake = disc(recon)
+        loss_gan = bce(pred_fake, valid)
+        total_loss = loss_vae + 0.01 * loss_gan
+
+        opt_vae.zero_grad()
+        total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(vae.parameters(), 1.0)
+        opt_vae.step()
+
+        sum_total += total_loss.item()
         sum_recon += recon_l.item()
         sum_kl += kl_l.item()
+        sum_gan += loss_gan.item()
 
     scheduler.step()
 
-    model.eval()
+    vae.eval()
     val_loss = 0.0
     with torch.no_grad():
         for (x_batch,) in val_loader:
             x_batch = x_batch.to(device)
-            recon, mu, logvar = model(x_batch)
+            recon, mu, logvar = vae(x_batch)
             loss, _, _ = vae_loss(recon, x_batch, mu, logvar, beta)
             val_loss += loss.item()
 
-    train_loss = sum_loss / len(train_loader)
+    train_loss = sum_total / len(train_loader)
     val_loss = val_loss / len(val_loader)
     recon_loss = sum_recon / len(train_loader)
     kl_loss = sum_kl / len(train_loader)
+    gan_loss = sum_gan / len(train_loader)
+
+    # --- Update beta based on KL divergence ---
+    if kl_loss > target_kl * (1 + kl_tolerance):
+        beta *= 1.1
+    elif kl_loss < target_kl * (1 - kl_tolerance):
+        beta *= 0.9
+    beta = float(np.clip(beta, 1e-5, 1.0))
 
     history["epoch"].append(epoch)
     history["train_loss"].append(train_loss)
     history["val_loss"].append(val_loss)
     history["recon_loss"].append(recon_loss)
     history["kl_loss"].append(kl_loss)
+    history["gan_loss"].append(gan_loss)
+    history["beta"].append(beta)
 
     print(f"Epoch {epoch:3d}/{EPOCHS} | Train {train_loss:.4f} | Val {val_loss:.4f} | "
-          f"Recon {recon_loss:.4f} | KL {kl_loss:.4f} | β={beta:.3f}")
+          f"Recon {recon_loss:.4f} | KL {kl_loss:.4f} | GAN {gan_loss:.4f} | β={beta:.4f}")
 
     if val_loss < best_val:
         best_val = val_loss
-        torch.save(model.state_dict(), MODEL_PATH)
-        print(f"  >> New best model saved to {MODEL_PATH}")
+        torch.save(vae.state_dict(), MODEL_PATH)
+        print(f"  >> Лучшая модель сохранена: {MODEL_PATH}")
 
+# --- Logging ---
 df = pd.DataFrame(history)
 df.to_csv(LOG_PATH, index=False)
-print("Лог обучения сохранён в", LOG_PATH)
+print("Лог сохранён:", LOG_PATH)
 
-plt.figure(figsize=(9, 5))
+plt.figure(figsize=(10, 5))
 plt.plot(df["epoch"], df["train_loss"], label="Train")
 plt.plot(df["epoch"], df["val_loss"], label="Val")
-plt.xlabel("Epoch")
-plt.ylabel("Loss")
-plt.title("U‑Net‑VAE Training")
-plt.legend(); plt.grid(True); plt.tight_layout()
-plt.savefig(PLOT_PATH)
-plt.close()
-print("График потерь сохранён в", PLOT_PATH)
+plt.xlabel("Epoch"); plt.ylabel("Loss")
+plt.title("VAE-GAN Training Loss")
+plt.legend(); plt.grid(True)
+plt.tight_layout(); plt.savefig(PLOT_PATH); plt.close()
+print("График потерь сохранён:", PLOT_PATH)
