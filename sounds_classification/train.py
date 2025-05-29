@@ -28,6 +28,9 @@ def train_model(model: torch.nn.Module,
     scaler = GradScaler("cuda")
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
 
+    train_losses = []
+    val_losses = []
+
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
@@ -54,22 +57,39 @@ def train_model(model: torch.nn.Module,
 
         epoch_loss = running_loss / total
         epoch_acc = correct / total
+        train_losses.append(epoch_loss)
         logging.info(f"Epoch {epoch + 1}: Train Loss={epoch_loss:.4f}, Accuracy={epoch_acc:.4f}")
 
         model.eval()
+        val_loss = 0.0
         val_correct, val_total = 0, 0
         with torch.no_grad():
             for inputs, labels in val_loader:
                 inputs, labels = inputs.to(device), labels.to(device)
                 with autocast("cuda"):  # Автоматический FP16
                     outputs = model(inputs)
+                    loss = criterion(outputs, labels)
+                val_loss += loss.item() * inputs.size(0)
                 _, preds = torch.max(outputs, 1)
                 val_correct += (preds == labels).sum().item()
                 val_total += labels.size(0)
 
+        val_loss /= val_total
+        val_losses.append(val_loss)
         val_acc = val_correct / val_total
         scheduler.step(val_acc)
-        logging.info(f"Validation Accuracy: {val_acc:.4f}\n")
+        logging.info(f"Validation Loss={val_loss:.4f}, Accuracy={val_acc:.4f}\n")
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(1, num_epochs + 1), train_losses, label="Train Loss", marker="o")
+    plt.plot(range(1, num_epochs + 1), val_losses, label="Validation Loss", marker="o")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Training and Validation Loss")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 def evaluate_model(model: torch.nn.Module, 
                    loader: DataLoader, 
@@ -135,4 +155,4 @@ if __name__=="__main__":
                 num_epochs=EPOCHS)
     
     evaluate_model(model, test_loader, device, "Test")
-    torch.save(model.state_dict, MODEL_OUTPUT)
+    torch.save(model.state_dict(), MODEL_OUTPUT)
