@@ -84,16 +84,14 @@ part2_index = move_groups(chainsaw4_groups, final_output_base, "val", "chainsaw4
 
 part1_index = move_groups(val_chainsaw_groups, final_output_base, "train", "val_chainsaw", part1_index)
 
-train_forest = forest_groups[:int(len(forest_groups) * 0.7)]
+train_forest = forest_groups[:int(len(forest_groups) * 0.6)]
 val_forest = forest_groups[int(len(forest_groups) * 0.7):]
-train_forest.append(val_forest.pop(0))
 
 part1_index = move_groups(train_forest, final_output_base, "train", "forest_relax", part1_index)
 part2_index = move_groups(val_forest, final_output_base, "val", "forest_relax", part2_index)
 
-train_street = street_groups[:int(len(street_groups) * 0.7)]
+train_street = street_groups[:int(len(street_groups) * 0.6)]
 val_street = street_groups[int(len(street_groups) * 0.7):]
-train_street.append(val_street.pop(0))
 
 part1_index = move_groups(train_street, final_output_base, "train", "street", part1_index)
 part2_index = move_groups(val_street, final_output_base, "val", "street", part2_index)
