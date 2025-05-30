@@ -12,6 +12,8 @@ from torch.nn.functional import binary_cross_entropy_with_logits
 
 from sklearn.metrics import roc_auc_score, roc_curve, f1_score, confusion_matrix
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torchviz import make_dot
+from model import ImprovedSpectrogramClassifier
 
 
 class SpectrogramGroupDataset(Dataset):
@@ -222,3 +224,11 @@ plt.ylabel('True Positive Rate')
 plt.title('Receiver Operating Characteristic (ROC)')
 plt.legend(loc="lower right")
 plt.show()
+
+model.eval()
+model = model.to("cpu")
+x = torch.randn(1, 4, 128, 128, requires_grad=True)
+y = model(x)
+
+dot = make_dot(y, params=dict(model.named_parameters()))
+dot.render("model_graph", format="png")

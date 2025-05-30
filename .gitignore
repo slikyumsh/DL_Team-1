@@ -2,3 +2,5 @@ ESC-50
 model_weights.pth
 dataset
 temp
+sounds_generation/artifacts
+model_graph
